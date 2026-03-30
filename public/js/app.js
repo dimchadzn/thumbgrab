@@ -8,6 +8,7 @@
     let nextPageToken = null;
     let uploadsPlaylist = null;
     let currentFilter = "all";
+    let isLoadingMore = false;
 
     // ── DOM refs ──
     const $ = (sel) => document.querySelector(sel);
@@ -99,6 +100,11 @@
         updateFabVisibility();
     }
 
+    // Count how many visible (non-filtered) cards are shown
+    function countVisibleCards() {
+        return grid.querySelectorAll(".card:not(.hidden-by-filter)").length;
+    }
+
     // ── FAB visibility ──
     let toolbarOutOfView = false;
     function updateFabVisibility() {
@@ -113,7 +119,6 @@
     // ── Filter logic ──
     function applyFilter(filter) {
         currentFilter = filter;
-        // Update button states
         document.querySelectorAll(".filter-btn").forEach(btn => {
             btn.classList.toggle("active", btn.dataset.filter === filter);
         });
@@ -127,6 +132,17 @@
             if (filter === "shorts" && !video.is_short) show = false;
             card.classList.toggle("hidden-by-filter", !show);
         });
+
+        // If we don't have enough visible cards, keep loading more
+        ensureEnoughVisible();
+    }
+
+    // Keep loading more batches until we have at least ~20 visible cards or no more pages
+    async function ensureEnoughVisible() {
+        const MIN_VISIBLE = 20;
+        while (countVisibleCards() < MIN_VISIBLE && nextPageToken && !isLoadingMore) {
+            await loadMore();
+        }
     }
 
     // Filter button clicks
@@ -168,10 +184,8 @@
             </div>
         `;
 
-        // Single click on card toggles selection
         card.addEventListener("click", (e) => {
             if (e.target.closest("[data-action]")) return;
-            // Don't toggle if this was a drag-end
             if (card._skipClick) { card._skipClick = false; return; }
             toggleSelect(video.id, card);
         });
@@ -219,98 +233,84 @@
     let isDragging = false;
     let dragStartX = 0;
     let dragStartY = 0;
-    let dragMinDistance = 5; // minimum px to count as a drag
-    let dragStarted = false; // true once we've moved past threshold
-    let preSelectionSnapshot = new Set(); // selection state before drag
+    let dragStartScrollX = 0;
+    let dragStartScrollY = 0;
+    const dragMinDistance = 5;
+    let dragStarted = false;
+    let preSelectionSnapshot = new Set();
+    let autoScrollRAF = null;
+    let lastMouseEvent = null;
 
-    gridWrap.addEventListener("mousedown", (e) => {
-        // Only left mouse button
+    // Auto-scroll speed constants
+    const SCROLL_ZONE = 60; // px from edge to trigger scroll
+    const SCROLL_SPEED = 8; // px per frame
+
+
+    document.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
-        // Don't start drag on interactive elements
-        if (e.target.closest(".card-action-btn, .btn, a, button, select, input")) return;
+        // Don't start drag on interactive elements or when results aren't visible
+        if (e.target.closest(".card-action-btn, .btn, a, button, select, input, .header, .lightbox, .download-overlay, .fab, .toast")) return;
+        if (resultsSection.style.display === "none") return;
 
         isDragging = true;
         dragStarted = false;
 
-        // Store position relative to gridWrap
-        const rect = gridWrap.getBoundingClientRect();
-        dragStartX = e.clientX - rect.left + gridWrap.scrollLeft;
-        dragStartY = e.clientY - rect.top + window.scrollY - gridWrap.getBoundingClientRect().top + window.scrollY;
+        // Store start position in client (viewport) coords + scroll offset
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        dragStartScrollX = window.scrollX;
+        dragStartScrollY = window.scrollY;
 
-        // Use page coordinates for easier math with scrolling
-        dragStartX = e.pageX;
-        dragStartY = e.pageY;
-
-        // Snapshot current selection (for additive drag with shift, but we'll use replace)
         preSelectionSnapshot = new Set(selectedIds);
+        lastMouseEvent = e;
 
         e.preventDefault();
     });
 
-    document.addEventListener("mousemove", (e) => {
-        if (!isDragging) return;
+    function updateSelectionBox(e) {
+        // Use client (viewport) coords for the fixed-position selection box
+        const startClientX = dragStartX - (window.scrollX - dragStartScrollX);
+        const startClientY = dragStartY - (window.scrollY - dragStartScrollY);
+        const endClientX = e.clientX;
+        const endClientY = e.clientY;
 
-        const dx = e.pageX - dragStartX;
-        const dy = e.pageY - dragStartY;
-
-        // Check if we've moved enough to start a drag
-        if (!dragStarted) {
-            if (Math.abs(dx) < dragMinDistance && Math.abs(dy) < dragMinDistance) return;
-            dragStarted = true;
-            gridWrap.classList.add("is-dragging");
-            selectionBox.style.display = "block";
-        }
-
-        // Calculate box position relative to gridWrap
-        const wrapRect = gridWrap.getBoundingClientRect();
-        const scrollTop = window.scrollY;
-
-        const boxLeft = Math.min(e.pageX, dragStartX) - wrapRect.left - scrollTop + wrapRect.top + scrollTop;
-        const boxTop = Math.min(e.pageY, dragStartY) - wrapRect.top - scrollTop;
-        const boxWidth = Math.abs(dx);
-        const boxHeight = Math.abs(dy);
-
-        // Convert page coords to gridWrap-relative coords
-        const relStartX = dragStartX - wrapRect.left;
-        const relStartY = dragStartY - (wrapRect.top + scrollTop);
-        const relEndX = e.pageX - wrapRect.left;
-        const relEndY = e.pageY - (wrapRect.top + scrollTop);
-
-        const left = Math.min(relStartX, relEndX);
-        const top = Math.min(relStartY, relEndY);
-        const width = Math.abs(relEndX - relStartX);
-        const height = Math.abs(relEndY - relStartY);
+        const left = Math.min(startClientX, endClientX);
+        const top = Math.min(startClientY, endClientY);
+        const width = Math.abs(endClientX - startClientX);
+        const height = Math.abs(endClientY - startClientY);
 
         selectionBox.style.left = left + "px";
         selectionBox.style.top = top + "px";
         selectionBox.style.width = width + "px";
         selectionBox.style.height = height + "px";
 
-        // Determine which cards intersect with the selection box
-        const selRect = {
-            left: left,
-            top: top,
-            right: left + width,
-            bottom: top + height,
-        };
+        // Use page coords for intersection (accounts for scroll)
+        const pageStartX = dragStartX + dragStartScrollX;
+        const pageStartY = dragStartY + dragStartScrollY;
+        const pageEndX = e.clientX + window.scrollX;
+        const pageEndY = e.clientY + window.scrollY;
 
-        // Reset selection to pre-drag state, then add intersecting
+        const selLeft = Math.min(pageStartX, pageEndX);
+        const selTop = Math.min(pageStartY, pageEndY);
+        const selRight = Math.max(pageStartX, pageEndX);
+        const selBottom = Math.max(pageStartY, pageEndY);
+
         selectedIds = new Set(preSelectionSnapshot);
 
         const cards = grid.querySelectorAll(".card:not(.hidden-by-filter)");
         cards.forEach(card => {
-            const cardRect = card.getBoundingClientRect();
-            // Convert card rect to gridWrap-relative coords
-            const cLeft = cardRect.left - wrapRect.left;
-            const cTop = cardRect.top - (wrapRect.top + scrollTop) + scrollTop;
-            const cRight = cLeft + cardRect.width;
-            const cBottom = cTop + cardRect.height;
+            const r = card.getBoundingClientRect();
+            // Convert card viewport rect to page coords
+            const cLeft = r.left + window.scrollX;
+            const cTop = r.top + window.scrollY;
+            const cRight = cLeft + r.width;
+            const cBottom = cTop + r.height;
 
             const intersects =
-                selRect.left < cRight &&
-                selRect.right > cLeft &&
-                selRect.top < cBottom &&
-                selRect.bottom > cTop;
+                selLeft < cRight &&
+                selRight > cLeft &&
+                selTop < cBottom &&
+                selBottom > cTop;
 
             const videoId = card.dataset.id;
             if (intersects) {
@@ -324,6 +324,50 @@
         });
 
         updateSelectionUI();
+    }
+
+    function autoScrollLoop() {
+        if (!isDragging || !dragStarted || !lastMouseEvent) return;
+
+        const viewportY = lastMouseEvent.clientY;
+        const viewportHeight = window.innerHeight;
+        let scrollDelta = 0;
+
+        // Near bottom edge → scroll down
+        if (viewportY > viewportHeight - SCROLL_ZONE) {
+            scrollDelta = SCROLL_SPEED * ((viewportY - (viewportHeight - SCROLL_ZONE)) / SCROLL_ZONE);
+        }
+        // Near top edge → scroll up
+        else if (viewportY < SCROLL_ZONE + 56) { // 56 = header height
+            scrollDelta = -SCROLL_SPEED * (((SCROLL_ZONE + 56) - viewportY) / SCROLL_ZONE);
+        }
+
+        if (scrollDelta !== 0) {
+            window.scrollBy(0, scrollDelta);
+            // Update the selection box to reflect the new scroll position
+            updateSelectionBox(lastMouseEvent);
+        }
+
+        autoScrollRAF = requestAnimationFrame(autoScrollLoop);
+    }
+
+    document.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+
+        lastMouseEvent = e;
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY + (window.scrollY - dragStartScrollY);
+
+        if (!dragStarted) {
+            if (Math.abs(dx) < dragMinDistance && Math.abs(dy) < dragMinDistance) return;
+            dragStarted = true;
+            document.body.classList.add("is-dragging");
+            selectionBox.style.display = "block";
+            // Start auto-scroll loop
+            autoScrollRAF = requestAnimationFrame(autoScrollLoop);
+        }
+
+        updateSelectionBox(e);
     });
 
     document.addEventListener("mouseup", (e) => {
@@ -332,23 +376,28 @@
         const wasDragStarted = dragStarted;
         isDragging = false;
         dragStarted = false;
-        gridWrap.classList.remove("is-dragging");
+        lastMouseEvent = null;
+        document.body.classList.remove("is-dragging");
         selectionBox.style.display = "none";
 
-        // If it was a real drag, prevent the click event on cards
+        // Stop auto-scroll
+        if (autoScrollRAF) {
+            cancelAnimationFrame(autoScrollRAF);
+            autoScrollRAF = null;
+        }
+
         if (wasDragStarted) {
             grid.querySelectorAll(".card").forEach(c => { c._skipClick = true; });
-            // Clear skipClick after a tick
             requestAnimationFrame(() => {
                 grid.querySelectorAll(".card").forEach(c => { c._skipClick = false; });
             });
         }
 
-        // If it was just a click (not a drag) on empty space, deselect all
+        // Click on empty space anywhere → deselect all
         if (!wasDragStarted) {
             const clickedCard = e.target.closest(".card");
-            const clickedButton = e.target.closest(".btn, button, a, select, input, .toolbar, .channel-bar, .load-more-wrap, .filter-btns");
-            if (!clickedCard && !clickedButton && gridWrap.contains(e.target)) {
+            const clickedInteractive = e.target.closest(".btn, button, a, select, input, .header, .lightbox, .download-overlay, .fab, .toast");
+            if (!clickedCard && !clickedInteractive && resultsSection.style.display !== "none") {
                 selectedIds.clear();
                 grid.querySelectorAll(".card").forEach(c => c.classList.remove("selected"));
                 updateSelectionUI();
@@ -356,7 +405,6 @@
         }
     });
 
-    // Prevent text selection during drag
     gridWrap.addEventListener("selectstart", (e) => {
         if (isDragging) e.preventDefault();
     });
@@ -408,7 +456,8 @@
 
     // ── Load more ──
     async function loadMore() {
-        if (!nextPageToken || !uploadsPlaylist) return;
+        if (!nextPageToken || !uploadsPlaylist || isLoadingMore) return;
+        isLoadingMore = true;
         setLoading(btnLoadMore, true);
         try {
             const resp = await fetch("/api/videos", {
@@ -428,6 +477,7 @@
         } catch (err) {
             showToast("Network error.");
         } finally {
+            isLoadingMore = false;
             setLoading(btnLoadMore, false);
         }
     }

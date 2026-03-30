@@ -59,9 +59,9 @@
                 </div>
                 <div class="search-hints">
                     <span>Try:</span>
-                    <button type="button" class="hint-chip" data-url="@mkbhd">@mkbhd</button>
-                    <button type="button" class="hint-chip" data-url="@Fireship">@Fireship</button>
-                    <button type="button" class="hint-chip" data-url="@PolyMatter">@PolyMatter</button>
+                    <button type="button" class="hint-chip" data-url="@MrBeast">@MrBeast</button>
+                    <button type="button" class="hint-chip" data-url="@BenAzelart">@BenAzelart</button>
+                    <button type="button" class="hint-chip" data-url="@StokesTwins">@StokesTwins</button>
                 </div>
             </form>
         </div>
@@ -125,8 +125,6 @@
         <!-- Thumbnail Grid -->
         <div class="grid-wrap" id="gridWrap">
             <div class="grid" id="thumbnailGrid"></div>
-            <!-- Drag selection box -->
-            <div class="selection-box" id="selectionBox"></div>
         </div>
 
         <!-- Load More -->
@@ -182,6 +180,9 @@
             <p id="downloadStatus">Preparing ZIP...</p>
         </div>
     </div>
+
+    <!-- Drag selection box (body level so it can render anywhere) -->
+    <div class="selection-box" id="selectionBox"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="/js/app.js"></script>

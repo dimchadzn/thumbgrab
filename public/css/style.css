@@ -364,7 +364,7 @@ body {
     user-select: none;
     -webkit-user-select: none;
 }
-.grid-wrap.is-dragging { cursor: crosshair; }
+body.is-dragging, body.is-dragging * { cursor: crosshair !important; }
 
 /* ── Grid ── */
 .grid {
@@ -376,12 +376,12 @@ body {
 
 /* ── Selection Box ── */
 .selection-box {
-    position: absolute;
+    position: fixed;
     border: 2px solid var(--selection-box-border);
     background: var(--selection-box-bg);
     border-radius: 4px;
     pointer-events: none;
-    z-index: 10;
+    z-index: 90;
     display: none;
 }
 
