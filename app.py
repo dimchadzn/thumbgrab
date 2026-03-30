@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="public", static_url_path="", template_folder="public")
 CORS(app)
 
 API_KEY = os.environ.get("YOUTUBE_API_KEY", "")

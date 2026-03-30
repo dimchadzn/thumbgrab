@@ -7,6 +7,7 @@
     let selectedIds = new Set();
     let nextPageToken = null;
     let uploadsPlaylist = null;
+    let currentFilter = "all"; // "all", "long", "shorts"
 
     // ── DOM refs ──
     const $ = (sel) => document.querySelector(sel);
@@ -25,11 +26,42 @@
     const btnNewSearch = $("#btnNewSearch");
     const selectionCount = $("#selectionCount");
     const qualitySelect = $("#qualitySelect");
+    const filterSelect = $("#filterSelect");
     const toast = $("#toast");
     const toastMessage = $("#toastMessage");
     const lightbox = $("#lightbox");
     const downloadOverlay = $("#downloadOverlay");
     const downloadStatus = $("#downloadStatus");
+    const fab = $("#fab");
+    const fabCount = $("#fabCount");
+    const fabDownloadZip = $("#fabDownloadZip");
+    const fabScrollTop = $("#fabScrollTop");
+    const toolbar = $("#toolbar");
+    const btnSelectRecent = $("#btnSelectRecent");
+    const recentCount = $("#recentCount");
+
+    // ── Dark mode ──
+    function initDarkMode() {
+        const saved = localStorage.getItem("theme");
+        if (saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+            document.documentElement.setAttribute("data-theme", "dark");
+        }
+    }
+
+    function toggleDarkMode() {
+        const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+        if (isDark) {
+            document.documentElement.removeAttribute("data-theme");
+            localStorage.setItem("theme", "light");
+        } else {
+            document.documentElement.setAttribute("data-theme", "dark");
+            localStorage.setItem("theme", "dark");
+        }
+    }
+
+    initDarkMode();
+    $("#darkToggle").addEventListener("click", toggleDarkMode);
+    $("#darkToggleHero").addEventListener("click", toggleDarkMode);
 
     // ── Helpers ──
     function showToast(msg, duration = 4000) {
@@ -61,17 +93,70 @@
         return num.toLocaleString();
     }
 
+    // Detect if a video is a Short based on title patterns and thumbnail aspect ratio
+    function isShort(video) {
+        const title = (video.title || "").toLowerCase();
+        // Shorts typically only have default/medium/high thumbnails, not maxres/standard
+        // Also check title for common shorts indicators
+        if (title.includes("#shorts") || title.includes("#short")) return true;
+        // If only low-res thumbnails available, likely a short
+        const thumbs = video.thumbnails || {};
+        if (!thumbs.maxres && !thumbs.standard && thumbs.default) return true;
+        return false;
+    }
+
     function updateSelectionUI() {
         const count = selectedIds.size;
         selectionCount.textContent = `${count} selected`;
         btnDownloadZip.disabled = count === 0;
+        fabCount.textContent = `${count} selected`;
+        fabDownloadZip.disabled = count === 0;
+        updateFabVisibility();
+    }
+
+    // ── Floating Action Bar visibility ──
+    let toolbarOutOfView = false;
+
+    function updateFabVisibility() {
+        const show = toolbarOutOfView && selectedIds.size > 0 && resultsSection.style.display !== "none";
+        fab.style.display = show ? "block" : "none";
+    }
+
+    const toolbarObserver = new IntersectionObserver((entries) => {
+        toolbarOutOfView = !entries[0].isIntersecting;
+        updateFabVisibility();
+    }, { threshold: 0 });
+
+    // ── Filter logic ──
+    function applyFilter() {
+        currentFilter = filterSelect.value;
+        const cards = grid.querySelectorAll(".card");
+        cards.forEach(card => {
+            const videoId = card.dataset.id;
+            const video = allVideos.find(v => v.id === videoId);
+            if (!video) return;
+            const short = isShort(video);
+            let show = true;
+            if (currentFilter === "long" && short) show = false;
+            if (currentFilter === "shorts" && !short) show = false;
+            card.classList.toggle("hidden-by-filter", !show);
+        });
     }
 
     // ── Card rendering ──
     function createCard(video) {
         const card = document.createElement("div");
+        const short = isShort(video);
         card.className = "card" + (selectedIds.has(video.id) ? " selected" : "");
         card.dataset.id = video.id;
+        if (short) card.dataset.type = "short";
+
+        // Apply current filter
+        if (currentFilter === "long" && short) card.classList.add("hidden-by-filter");
+        if (currentFilter === "shorts" && !short) card.classList.add("hidden-by-filter");
+
+        const badgeHtml = short ? `<div class="card-badge">Short</div>` : "";
+
         card.innerHTML = `
             <div class="card-thumb-wrap">
                 <img class="card-thumb" src="${video.thumbnail}" alt="" loading="lazy">
@@ -86,6 +171,7 @@
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     </button>
                 </div>
+                ${badgeHtml}
             </div>
             <div class="card-body">
                 <div class="card-title" title="${video.title.replace(/"/g, '&quot;')}">${escapeHtml(video.title)}</div>
@@ -157,6 +243,8 @@
             nextPageToken = data.next_page_token;
             uploadsPlaylist = data.channel.uploads_playlist;
             selectedIds.clear();
+            currentFilter = "all";
+            filterSelect.value = "all";
 
             $("#channelAvatar").src = channelData.thumbnail;
             $("#channelTitle").textContent = channelData.title;
@@ -169,7 +257,11 @@
             heroSection.style.display = "none";
             resultsSection.style.display = "block";
             headerActions.style.display = "flex";
+            $("#darkToggleHero").style.display = "none";
             loadMoreWrap.style.display = nextPageToken ? "flex" : "none";
+
+            // Start observing toolbar for FAB
+            toolbarObserver.observe(toolbar);
 
         } catch (err) {
             showToast("Network error. Please try again.");
@@ -213,7 +305,6 @@
         const filename = `${safeTitle}_${video.id}.jpg`;
 
         try {
-            // Proxy through our worker to avoid CORS
             const resp = await fetch(`/api/proxy-thumbnail?url=${encodeURIComponent(url)}`);
             const blob = await resp.blob();
             const a = document.createElement("a");
@@ -240,7 +331,6 @@
             const zip = new JSZip();
             let done = 0;
 
-            // Download in batches of 6 to avoid overwhelming the browser
             const batchSize = 6;
             for (let i = 0; i < selected.length; i += batchSize) {
                 const batch = selected.slice(i, i + batchSize);
@@ -299,13 +389,39 @@
         heroSection.style.display = "flex";
         resultsSection.style.display = "none";
         headerActions.style.display = "none";
+        $("#darkToggleHero").style.display = "";
+        fab.style.display = "none";
         grid.innerHTML = "";
         allVideos = [];
         selectedIds.clear();
         nextPageToken = null;
         channelData = null;
+        currentFilter = "all";
+        filterSelect.value = "all";
         channelInput.value = "";
         channelInput.focus();
+        toolbarObserver.disconnect();
+    }
+
+    // ── Select recent N ──
+    function selectRecentN() {
+        const n = parseInt(recentCount.value) || 20;
+        // Get visible (non-filtered) videos, take first N (most recent)
+        let count = 0;
+        selectedIds.clear();
+        grid.querySelectorAll(".card").forEach(c => c.classList.remove("selected"));
+
+        for (const v of allVideos) {
+            if (count >= n) break;
+            const short = isShort(v);
+            if (currentFilter === "long" && short) continue;
+            if (currentFilter === "shorts" && !short) continue;
+            selectedIds.add(v.id);
+            const card = grid.querySelector(`.card[data-id="${v.id}"]`);
+            if (card) card.classList.add("selected");
+            count++;
+        }
+        updateSelectionUI();
     }
 
     // ── Event listeners ──
@@ -326,8 +442,13 @@
     btnLoadMore.addEventListener("click", loadMore);
 
     btnSelectAll.addEventListener("click", () => {
-        allVideos.forEach(v => selectedIds.add(v.id));
-        grid.querySelectorAll(".card").forEach(c => c.classList.add("selected"));
+        allVideos.forEach(v => {
+            const short = isShort(v);
+            if (currentFilter === "long" && short) return;
+            if (currentFilter === "shorts" && !short) return;
+            selectedIds.add(v.id);
+        });
+        grid.querySelectorAll(".card:not(.hidden-by-filter)").forEach(c => c.classList.add("selected"));
         updateSelectionUI();
     });
 
@@ -337,7 +458,19 @@
         updateSelectionUI();
     });
 
+    btnSelectRecent.addEventListener("click", selectRecentN);
+    recentCount.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); selectRecentN(); }
+    });
+
+    filterSelect.addEventListener("change", applyFilter);
+
     btnDownloadZip.addEventListener("click", downloadZip);
+    fabDownloadZip.addEventListener("click", downloadZip);
+    fabScrollTop.addEventListener("click", () => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
     btnNewSearch.addEventListener("click", resetToSearch);
 
     $("#lightboxClose").addEventListener("click", closeLightbox);
