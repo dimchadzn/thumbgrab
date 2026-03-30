@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThumbGrab — YouTube Thumbnail Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-inner">
+            <a href="/" class="logo">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                </svg>
+                <span>ThumbGrab</span>
+            </a>
+            <div class="header-actions" id="headerActions" style="display:none;">
+                <button class="btn btn-ghost" id="btnNewSearch">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                    New Search
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero / Search Section -->
+    <section class="hero" id="heroSection">
+        <div class="hero-content">
+            <h1>Download YouTube Thumbnails</h1>
+            <p class="hero-sub">Paste a channel link, pick the thumbnails you want, download them all at once.</p>
+            <form class="search-form" id="searchForm">
+                <div class="search-input-wrap">
+                    <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input
+                        type="text"
+                        id="channelInput"
+                        placeholder="Paste YouTube channel URL or @handle..."
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <button type="submit" class="btn btn-primary" id="searchBtn">
+                        <span class="btn-text">Fetch Thumbnails</span>
+                        <span class="btn-loader" style="display:none;">
+                            <svg class="spinner" width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+                        </span>
+                    </button>
+                </div>
+                <div class="search-hints">
+                    <span>Try:</span>
+                    <button type="button" class="hint-chip" data-url="@mkbhd">@mkbhd</button>
+                    <button type="button" class="hint-chip" data-url="@Fireship">@Fireship</button>
+                    <button type="button" class="hint-chip" data-url="@PolyMatter">@PolyMatter</button>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <!-- Error Toast -->
+    <div class="toast" id="toast" style="display:none;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        <span id="toastMessage"></span>
+    </div>
+
+    <!-- Results Section -->
+    <section class="results" id="resultsSection" style="display:none;">
+        <!-- Channel Info Bar -->
+        <div class="channel-bar">
+            <div class="channel-info">
+                <img id="channelAvatar" class="channel-avatar" src="" alt="">
+                <div>
+                    <h2 id="channelTitle" class="channel-name"></h2>
+                    <span id="channelStats" class="channel-stats"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <button class="btn btn-outline btn-sm" id="btnSelectAll">Select All</button>
+                <button class="btn btn-outline btn-sm" id="btnDeselectAll">Deselect All</button>
+                <span class="selection-count" id="selectionCount">0 selected</span>
+            </div>
+            <div class="toolbar-right">
+                <div class="quality-picker">
+                    <label for="qualitySelect">Quality:</label>
+                    <select id="qualitySelect" class="select-input">
+                        <option value="maxres">Max (1280x720)</option>
+                        <option value="standard">Standard (640x480)</option>
+                        <option value="high">High (480x360)</option>
+                        <option value="medium">Medium (320x180)</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btnDownloadZip" disabled>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Download ZIP
+                </button>
+            </div>
+        </div>
+
+        <!-- Thumbnail Grid -->
+        <div class="grid" id="thumbnailGrid"></div>
+
+        <!-- Load More -->
+        <div class="load-more-wrap" id="loadMoreWrap" style="display:none;">
+            <button class="btn btn-outline" id="btnLoadMore">
+                <span class="btn-text">Load More</span>
+                <span class="btn-loader" style="display:none;">
+                    <svg class="spinner" width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+                </span>
+            </button>
+        </div>
+    </section>
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox" style="display:none;">
+        <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
+        <div class="lightbox-content">
+            <button class="lightbox-close" id="lightboxClose">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <img id="lightboxImg" src="" alt="">
+            <div class="lightbox-info">
+                <h3 id="lightboxTitle"></h3>
+                <div class="lightbox-actions">
+                    <button class="btn btn-primary btn-sm" id="lightboxDownload">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Download Progress Overlay -->
+    <div class="download-overlay" id="downloadOverlay" style="display:none;">
+        <div class="download-modal">
+            <svg class="spinner big" width="36" height="36" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+            <p id="downloadStatus">Preparing ZIP...</p>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
