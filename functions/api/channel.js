@@ -56,10 +56,18 @@ function parseDuration(iso) {
     return (parseInt(m[1] || 0) * 3600) + (parseInt(m[2] || 0) * 60) + parseInt(m[3] || 0);
 }
 
+function isLikelyShort(title, durationSeconds) {
+    // Duration-based: shorts are up to ~62s (some wiggle room for encoding)
+    if (durationSeconds > 0 && durationSeconds <= 62) return true;
+    // Title-based: creators often tag shorts
+    const t = (title || "").toLowerCase();
+    if (t.includes("#shorts") || t.includes("#short")) return true;
+    return false;
+}
+
 // Fetch video durations and enrich video objects
 async function enrichWithDurations(videos, apiKey) {
     if (!videos.length) return videos;
-    // YouTube API accepts up to 50 IDs per request
     const ids = videos.map(v => v.id).join(",");
     const resp = await fetch(`${YT_API}/videos?part=contentDetails&id=${ids}&key=${apiKey}`);
     const data = await resp.json();
@@ -73,7 +81,7 @@ async function enrichWithDurations(videos, apiKey) {
     return videos.map(v => ({
         ...v,
         duration: durationMap[v.id] || 0,
-        is_short: (durationMap[v.id] || 0) <= 60,
+        is_short: isLikelyShort(v.title, durationMap[v.id] || 0),
     }));
 }
 

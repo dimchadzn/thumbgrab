@@ -8,6 +8,13 @@ function parseDuration(iso) {
     return (parseInt(m[1] || 0) * 3600) + (parseInt(m[2] || 0) * 60) + parseInt(m[3] || 0);
 }
 
+function isLikelyShort(title, durationSeconds) {
+    if (durationSeconds > 0 && durationSeconds <= 62) return true;
+    const t = (title || "").toLowerCase();
+    if (t.includes("#shorts") || t.includes("#short")) return true;
+    return false;
+}
+
 async function enrichWithDurations(videos, apiKey) {
     if (!videos.length) return videos;
     const ids = videos.map(v => v.id).join(",");
@@ -23,7 +30,7 @@ async function enrichWithDurations(videos, apiKey) {
     return videos.map(v => ({
         ...v,
         duration: durationMap[v.id] || 0,
-        is_short: (durationMap[v.id] || 0) <= 60,
+        is_short: isLikelyShort(v.title, durationMap[v.id] || 0),
     }));
 }
 

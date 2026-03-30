@@ -443,7 +443,7 @@
             heroSection.style.display = "none";
             resultsSection.style.display = "block";
             headerActions.style.display = "flex";
-            loadMoreWrap.style.display = nextPageToken ? "flex" : "none";
+            loadMoreWrap.style.display = "none";
 
             toolbarObserver.observe(toolbar);
         } catch (err) {
@@ -458,7 +458,6 @@
     async function loadMore() {
         if (!nextPageToken || !uploadsPlaylist || isLoadingMore) return;
         isLoadingMore = true;
-        setLoading(btnLoadMore, true);
         try {
             const resp = await fetch("/api/videos", {
                 method: "POST",
@@ -473,12 +472,10 @@
             allVideos.push(...data.videos);
             nextPageToken = data.next_page_token;
             renderVideos(data.videos, true);
-            loadMoreWrap.style.display = nextPageToken ? "flex" : "none";
         } catch (err) {
             showToast("Network error.");
         } finally {
             isLoadingMore = false;
-            setLoading(btnLoadMore, false);
         }
     }
 
@@ -597,6 +594,16 @@
     });
 
     btnLoadMore.addEventListener("click", loadMore);
+
+    // ── Infinite scroll ──
+    window.addEventListener("scroll", () => {
+        if (!nextPageToken || isLoadingMore || resultsSection.style.display === "none") return;
+        const scrollBottom = window.innerHeight + window.scrollY;
+        const threshold = document.body.offsetHeight - 800;
+        if (scrollBottom >= threshold) {
+            loadMore();
+        }
+    });
 
     btnSelectAll.addEventListener("click", () => {
         allVideos.forEach(v => {

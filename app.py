@@ -233,7 +233,8 @@ def enrich_with_durations(videos):
     for v in videos:
         dur = duration_map.get(v["id"], 0)
         v["duration"] = dur
-        v["is_short"] = dur <= 60
+        title = (v.get("title") or "").lower()
+        v["is_short"] = (0 < dur <= 62) or ("#shorts" in title) or ("#short" in title)
     return videos
 
 
