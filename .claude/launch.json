@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "thumbgrab",
+      "runtimeExecutable": "/Users/dimitris/claude?/.venv/bin/python",
+      "runtimeArgs": ["app.py"],
+      "port": 5001,
+      "autoPort": true
+    }
+  ]
+}

@@ -48,6 +48,35 @@ async function resolveChannelId(channelInput, apiKey) {
     return null;
 }
 
+// Parse ISO 8601 duration to seconds
+function parseDuration(iso) {
+    if (!iso) return 0;
+    const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!m) return 0;
+    return (parseInt(m[1] || 0) * 3600) + (parseInt(m[2] || 0) * 60) + parseInt(m[3] || 0);
+}
+
+// Fetch video durations and enrich video objects
+async function enrichWithDurations(videos, apiKey) {
+    if (!videos.length) return videos;
+    // YouTube API accepts up to 50 IDs per request
+    const ids = videos.map(v => v.id).join(",");
+    const resp = await fetch(`${YT_API}/videos?part=contentDetails&id=${ids}&key=${apiKey}`);
+    const data = await resp.json();
+
+    const durationMap = {};
+    for (const item of (data.items || [])) {
+        const seconds = parseDuration(item.contentDetails?.duration);
+        durationMap[item.id] = seconds;
+    }
+
+    return videos.map(v => ({
+        ...v,
+        duration: durationMap[v.id] || 0,
+        is_short: (durationMap[v.id] || 0) <= 60,
+    }));
+}
+
 export async function onRequestPost(context) {
     const apiKey = context.env.YOUTUBE_API_KEY;
     if (!apiKey) {
@@ -75,6 +104,9 @@ export async function onRequestPost(context) {
     // Fetch first batch of videos
     const { videos, nextPageToken } = await fetchVideos(uploadsPlaylist, null, apiKey);
 
+    // Enrich with durations to detect shorts
+    const enrichedVideos = await enrichWithDurations(videos, apiKey);
+
     return Response.json({
         channel: {
             id: channelId,
@@ -85,7 +117,7 @@ export async function onRequestPost(context) {
             video_count: channel.statistics.videoCount || "0",
             uploads_playlist: uploadsPlaylist,
         },
-        videos,
+        videos: enrichedVideos,
         next_page_token: nextPageToken,
     });
 }

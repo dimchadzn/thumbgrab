@@ -7,7 +7,7 @@
     let selectedIds = new Set();
     let nextPageToken = null;
     let uploadsPlaylist = null;
-    let currentFilter = "all"; // "all", "long", "shorts"
+    let currentFilter = "all";
 
     // ── DOM refs ──
     const $ = (sel) => document.querySelector(sel);
@@ -18,6 +18,8 @@
     const channelInput = $("#channelInput");
     const searchBtn = $("#searchBtn");
     const grid = $("#thumbnailGrid");
+    const gridWrap = $("#gridWrap");
+    const selectionBox = $("#selectionBox");
     const loadMoreWrap = $("#loadMoreWrap");
     const btnLoadMore = $("#btnLoadMore");
     const btnSelectAll = $("#btnSelectAll");
@@ -26,7 +28,6 @@
     const btnNewSearch = $("#btnNewSearch");
     const selectionCount = $("#selectionCount");
     const qualitySelect = $("#qualitySelect");
-    const filterSelect = $("#filterSelect");
     const toast = $("#toast");
     const toastMessage = $("#toastMessage");
     const lightbox = $("#lightbox");
@@ -37,8 +38,6 @@
     const fabDownloadZip = $("#fabDownloadZip");
     const fabScrollTop = $("#fabScrollTop");
     const toolbar = $("#toolbar");
-    const btnSelectRecent = $("#btnSelectRecent");
-    const recentCount = $("#recentCount");
 
     // ── Dark mode ──
     function initDarkMode() {
@@ -61,7 +60,6 @@
 
     initDarkMode();
     $("#darkToggle").addEventListener("click", toggleDarkMode);
-    $("#darkToggleHero").addEventListener("click", toggleDarkMode);
 
     // ── Helpers ──
     function showToast(msg, duration = 4000) {
@@ -81,8 +79,7 @@
 
     function formatDate(iso) {
         if (!iso) return "";
-        const d = new Date(iso);
-        return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     }
 
     function formatNumber(n) {
@@ -91,18 +88,6 @@
         if (num >= 1_000_000) return (num / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
         if (num >= 1_000) return (num / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
         return num.toLocaleString();
-    }
-
-    // Detect if a video is a Short based on title patterns and thumbnail aspect ratio
-    function isShort(video) {
-        const title = (video.title || "").toLowerCase();
-        // Shorts typically only have default/medium/high thumbnails, not maxres/standard
-        // Also check title for common shorts indicators
-        if (title.includes("#shorts") || title.includes("#short")) return true;
-        // If only low-res thumbnails available, likely a short
-        const thumbs = video.thumbnails || {};
-        if (!thumbs.maxres && !thumbs.standard && thumbs.default) return true;
-        return false;
     }
 
     function updateSelectionUI() {
@@ -114,48 +99,52 @@
         updateFabVisibility();
     }
 
-    // ── Floating Action Bar visibility ──
+    // ── FAB visibility ──
     let toolbarOutOfView = false;
-
     function updateFabVisibility() {
         const show = toolbarOutOfView && selectedIds.size > 0 && resultsSection.style.display !== "none";
         fab.style.display = show ? "block" : "none";
     }
-
     const toolbarObserver = new IntersectionObserver((entries) => {
         toolbarOutOfView = !entries[0].isIntersecting;
         updateFabVisibility();
     }, { threshold: 0 });
 
     // ── Filter logic ──
-    function applyFilter() {
-        currentFilter = filterSelect.value;
-        const cards = grid.querySelectorAll(".card");
-        cards.forEach(card => {
+    function applyFilter(filter) {
+        currentFilter = filter;
+        // Update button states
+        document.querySelectorAll(".filter-btn").forEach(btn => {
+            btn.classList.toggle("active", btn.dataset.filter === filter);
+        });
+        // Show/hide cards
+        grid.querySelectorAll(".card").forEach(card => {
             const videoId = card.dataset.id;
             const video = allVideos.find(v => v.id === videoId);
             if (!video) return;
-            const short = isShort(video);
             let show = true;
-            if (currentFilter === "long" && short) show = false;
-            if (currentFilter === "shorts" && !short) show = false;
+            if (filter === "long" && video.is_short) show = false;
+            if (filter === "shorts" && !video.is_short) show = false;
             card.classList.toggle("hidden-by-filter", !show);
         });
     }
 
+    // Filter button clicks
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+        btn.addEventListener("click", () => applyFilter(btn.dataset.filter));
+    });
+
     // ── Card rendering ──
     function createCard(video) {
         const card = document.createElement("div");
-        const short = isShort(video);
         card.className = "card" + (selectedIds.has(video.id) ? " selected" : "");
         card.dataset.id = video.id;
-        if (short) card.dataset.type = "short";
 
         // Apply current filter
-        if (currentFilter === "long" && short) card.classList.add("hidden-by-filter");
-        if (currentFilter === "shorts" && !short) card.classList.add("hidden-by-filter");
+        if (currentFilter === "long" && video.is_short) card.classList.add("hidden-by-filter");
+        if (currentFilter === "shorts" && !video.is_short) card.classList.add("hidden-by-filter");
 
-        const badgeHtml = short ? `<div class="card-badge">Short</div>` : "";
+        const badgeHtml = video.is_short ? `<div class="card-badge">Short</div>` : "";
 
         card.innerHTML = `
             <div class="card-thumb-wrap">
@@ -179,8 +168,11 @@
             </div>
         `;
 
+        // Single click on card toggles selection
         card.addEventListener("click", (e) => {
             if (e.target.closest("[data-action]")) return;
+            // Don't toggle if this was a drag-end
+            if (card._skipClick) { card._skipClick = false; return; }
             toggleSelect(video.id, card);
         });
 
@@ -217,11 +209,157 @@
     function renderVideos(videos, append = false) {
         if (!append) grid.innerHTML = "";
         const fragment = document.createDocumentFragment();
-        for (const v of videos) {
-            fragment.appendChild(createCard(v));
-        }
+        for (const v of videos) fragment.appendChild(createCard(v));
         grid.appendChild(fragment);
     }
+
+    // ════════════════════════════════════════════
+    // ── DRAG SELECTION BOX ──
+    // ════════════════════════════════════════════
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragMinDistance = 5; // minimum px to count as a drag
+    let dragStarted = false; // true once we've moved past threshold
+    let preSelectionSnapshot = new Set(); // selection state before drag
+
+    gridWrap.addEventListener("mousedown", (e) => {
+        // Only left mouse button
+        if (e.button !== 0) return;
+        // Don't start drag on interactive elements
+        if (e.target.closest(".card-action-btn, .btn, a, button, select, input")) return;
+
+        isDragging = true;
+        dragStarted = false;
+
+        // Store position relative to gridWrap
+        const rect = gridWrap.getBoundingClientRect();
+        dragStartX = e.clientX - rect.left + gridWrap.scrollLeft;
+        dragStartY = e.clientY - rect.top + window.scrollY - gridWrap.getBoundingClientRect().top + window.scrollY;
+
+        // Use page coordinates for easier math with scrolling
+        dragStartX = e.pageX;
+        dragStartY = e.pageY;
+
+        // Snapshot current selection (for additive drag with shift, but we'll use replace)
+        preSelectionSnapshot = new Set(selectedIds);
+
+        e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+
+        const dx = e.pageX - dragStartX;
+        const dy = e.pageY - dragStartY;
+
+        // Check if we've moved enough to start a drag
+        if (!dragStarted) {
+            if (Math.abs(dx) < dragMinDistance && Math.abs(dy) < dragMinDistance) return;
+            dragStarted = true;
+            gridWrap.classList.add("is-dragging");
+            selectionBox.style.display = "block";
+        }
+
+        // Calculate box position relative to gridWrap
+        const wrapRect = gridWrap.getBoundingClientRect();
+        const scrollTop = window.scrollY;
+
+        const boxLeft = Math.min(e.pageX, dragStartX) - wrapRect.left - scrollTop + wrapRect.top + scrollTop;
+        const boxTop = Math.min(e.pageY, dragStartY) - wrapRect.top - scrollTop;
+        const boxWidth = Math.abs(dx);
+        const boxHeight = Math.abs(dy);
+
+        // Convert page coords to gridWrap-relative coords
+        const relStartX = dragStartX - wrapRect.left;
+        const relStartY = dragStartY - (wrapRect.top + scrollTop);
+        const relEndX = e.pageX - wrapRect.left;
+        const relEndY = e.pageY - (wrapRect.top + scrollTop);
+
+        const left = Math.min(relStartX, relEndX);
+        const top = Math.min(relStartY, relEndY);
+        const width = Math.abs(relEndX - relStartX);
+        const height = Math.abs(relEndY - relStartY);
+
+        selectionBox.style.left = left + "px";
+        selectionBox.style.top = top + "px";
+        selectionBox.style.width = width + "px";
+        selectionBox.style.height = height + "px";
+
+        // Determine which cards intersect with the selection box
+        const selRect = {
+            left: left,
+            top: top,
+            right: left + width,
+            bottom: top + height,
+        };
+
+        // Reset selection to pre-drag state, then add intersecting
+        selectedIds = new Set(preSelectionSnapshot);
+
+        const cards = grid.querySelectorAll(".card:not(.hidden-by-filter)");
+        cards.forEach(card => {
+            const cardRect = card.getBoundingClientRect();
+            // Convert card rect to gridWrap-relative coords
+            const cLeft = cardRect.left - wrapRect.left;
+            const cTop = cardRect.top - (wrapRect.top + scrollTop) + scrollTop;
+            const cRight = cLeft + cardRect.width;
+            const cBottom = cTop + cardRect.height;
+
+            const intersects =
+                selRect.left < cRight &&
+                selRect.right > cLeft &&
+                selRect.top < cBottom &&
+                selRect.bottom > cTop;
+
+            const videoId = card.dataset.id;
+            if (intersects) {
+                selectedIds.add(videoId);
+                card.classList.add("selected");
+            } else if (preSelectionSnapshot.has(videoId)) {
+                card.classList.add("selected");
+            } else {
+                card.classList.remove("selected");
+            }
+        });
+
+        updateSelectionUI();
+    });
+
+    document.addEventListener("mouseup", (e) => {
+        if (!isDragging) return;
+
+        const wasDragStarted = dragStarted;
+        isDragging = false;
+        dragStarted = false;
+        gridWrap.classList.remove("is-dragging");
+        selectionBox.style.display = "none";
+
+        // If it was a real drag, prevent the click event on cards
+        if (wasDragStarted) {
+            grid.querySelectorAll(".card").forEach(c => { c._skipClick = true; });
+            // Clear skipClick after a tick
+            requestAnimationFrame(() => {
+                grid.querySelectorAll(".card").forEach(c => { c._skipClick = false; });
+            });
+        }
+
+        // If it was just a click (not a drag) on empty space, deselect all
+        if (!wasDragStarted) {
+            const clickedCard = e.target.closest(".card");
+            const clickedButton = e.target.closest(".btn, button, a, select, input, .toolbar, .channel-bar, .load-more-wrap, .filter-btns");
+            if (!clickedCard && !clickedButton && gridWrap.contains(e.target)) {
+                selectedIds.clear();
+                grid.querySelectorAll(".card").forEach(c => c.classList.remove("selected"));
+                updateSelectionUI();
+            }
+        }
+    });
+
+    // Prevent text selection during drag
+    gridWrap.addEventListener("selectstart", (e) => {
+        if (isDragging) e.preventDefault();
+    });
 
     // ── Fetch channel ──
     async function fetchChannel(url) {
@@ -244,7 +382,7 @@
             uploadsPlaylist = data.channel.uploads_playlist;
             selectedIds.clear();
             currentFilter = "all";
-            filterSelect.value = "all";
+            document.querySelectorAll(".filter-btn").forEach(b => b.classList.toggle("active", b.dataset.filter === "all"));
 
             $("#channelAvatar").src = channelData.thumbnail;
             $("#channelTitle").textContent = channelData.title;
@@ -257,12 +395,9 @@
             heroSection.style.display = "none";
             resultsSection.style.display = "block";
             headerActions.style.display = "flex";
-            $("#darkToggleHero").style.display = "none";
             loadMoreWrap.style.display = nextPageToken ? "flex" : "none";
 
-            // Start observing toolbar for FAB
             toolbarObserver.observe(toolbar);
-
         } catch (err) {
             showToast("Network error. Please try again.");
             console.error(err);
@@ -297,13 +432,12 @@
         }
     }
 
-    // ── Download single thumbnail ──
+    // ── Download single ──
     async function downloadSingle(video) {
         const quality = qualitySelect.value;
         const url = (video.thumbnails && video.thumbnails[quality]) || video.thumbnail;
         const safeTitle = video.title.replace(/[^\w\s-]/g, "").trim().slice(0, 80) || video.id;
         const filename = `${safeTitle}_${video.id}.jpg`;
-
         try {
             const resp = await fetch(`/api/proxy-thumbnail?url=${encodeURIComponent(url)}`);
             const blob = await resp.blob();
@@ -319,18 +453,15 @@
         }
     }
 
-    // ── Download ZIP (client-side using JSZip) ──
+    // ── Download ZIP ──
     async function downloadZip() {
         const selected = allVideos.filter(v => selectedIds.has(v.id));
         if (selected.length === 0) return;
-
         const quality = qualitySelect.value;
         downloadOverlay.style.display = "flex";
-
         try {
             const zip = new JSZip();
             let done = 0;
-
             const batchSize = 6;
             for (let i = 0; i < selected.length; i += batchSize) {
                 const batch = selected.slice(i, i + batchSize);
@@ -345,10 +476,9 @@
                         zip.file(`${safeTitle}_${v.id}.jpg`, blob);
                         done++;
                         downloadStatus.textContent = `Downloading ${done}/${selected.length}...`;
-                    } catch (e) { /* skip failed */ }
+                    } catch (e) { /* skip */ }
                 }));
             }
-
             downloadStatus.textContent = "Creating ZIP...";
             const blob = await zip.generateAsync({ type: "blob" });
             const channelName = (channelData?.title || "thumbnails").replace(/[^\w\s-]/g, "").trim();
@@ -389,7 +519,6 @@
         heroSection.style.display = "flex";
         resultsSection.style.display = "none";
         headerActions.style.display = "none";
-        $("#darkToggleHero").style.display = "";
         fab.style.display = "none";
         grid.innerHTML = "";
         allVideos = [];
@@ -397,31 +526,9 @@
         nextPageToken = null;
         channelData = null;
         currentFilter = "all";
-        filterSelect.value = "all";
         channelInput.value = "";
         channelInput.focus();
         toolbarObserver.disconnect();
-    }
-
-    // ── Select recent N ──
-    function selectRecentN() {
-        const n = parseInt(recentCount.value) || 20;
-        // Get visible (non-filtered) videos, take first N (most recent)
-        let count = 0;
-        selectedIds.clear();
-        grid.querySelectorAll(".card").forEach(c => c.classList.remove("selected"));
-
-        for (const v of allVideos) {
-            if (count >= n) break;
-            const short = isShort(v);
-            if (currentFilter === "long" && short) continue;
-            if (currentFilter === "shorts" && !short) continue;
-            selectedIds.add(v.id);
-            const card = grid.querySelector(`.card[data-id="${v.id}"]`);
-            if (card) card.classList.add("selected");
-            count++;
-        }
-        updateSelectionUI();
     }
 
     // ── Event listeners ──
@@ -443,9 +550,8 @@
 
     btnSelectAll.addEventListener("click", () => {
         allVideos.forEach(v => {
-            const short = isShort(v);
-            if (currentFilter === "long" && short) return;
-            if (currentFilter === "shorts" && !short) return;
+            if (currentFilter === "long" && v.is_short) return;
+            if (currentFilter === "shorts" && !v.is_short) return;
             selectedIds.add(v.id);
         });
         grid.querySelectorAll(".card:not(.hidden-by-filter)").forEach(c => c.classList.add("selected"));
@@ -458,19 +564,9 @@
         updateSelectionUI();
     });
 
-    btnSelectRecent.addEventListener("click", selectRecentN);
-    recentCount.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); selectRecentN(); }
-    });
-
-    filterSelect.addEventListener("change", applyFilter);
-
     btnDownloadZip.addEventListener("click", downloadZip);
     fabDownloadZip.addEventListener("click", downloadZip);
-    fabScrollTop.addEventListener("click", () => {
-        window.scrollTo({ top: 0, behavior: "smooth" });
-    });
-
+    fabScrollTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
     btnNewSearch.addEventListener("click", resetToSearch);
 
     $("#lightboxClose").addEventListener("click", closeLightbox);

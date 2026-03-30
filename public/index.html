@@ -20,22 +20,18 @@
                 </svg>
                 <span>ThumbGrab</span>
             </a>
-            <div class="header-actions" id="headerActions" style="display:none;">
-                <button class="btn btn-ghost" id="btnNewSearch">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-                    New Search
-                </button>
-                <!-- Dark mode toggle -->
+            <div class="header-right-always">
+                <div class="header-actions" id="headerActions" style="display:none;">
+                    <button class="btn btn-ghost" id="btnNewSearch">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        New Search
+                    </button>
+                </div>
                 <button class="btn btn-ghost dark-toggle" id="darkToggle" title="Toggle dark mode">
                     <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                     <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
                 </button>
             </div>
-            <!-- Dark toggle also on hero page -->
-            <button class="btn btn-ghost dark-toggle hero-dark-toggle" id="darkToggleHero" title="Toggle dark mode">
-                <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
-            </button>
         </div>
     </header>
 
@@ -95,23 +91,14 @@
             <div class="toolbar-left">
                 <button class="btn btn-outline btn-sm" id="btnSelectAll">Select All</button>
                 <button class="btn btn-outline btn-sm" id="btnDeselectAll">Deselect All</button>
-                <!-- Select recent N -->
-                <div class="select-recent">
-                    <label for="recentCount">Select recent</label>
-                    <input type="number" id="recentCount" class="select-input recent-input" min="1" value="20" placeholder="20">
-                    <button class="btn btn-outline btn-sm" id="btnSelectRecent">Go</button>
-                </div>
                 <span class="selection-count" id="selectionCount">0 selected</span>
             </div>
             <div class="toolbar-right">
-                <!-- Filter -->
-                <div class="filter-picker">
-                    <label for="filterSelect">Show:</label>
-                    <select id="filterSelect" class="select-input">
-                        <option value="all">All Videos</option>
-                        <option value="long">Long-form Only</option>
-                        <option value="shorts">Shorts Only</option>
-                    </select>
+                <!-- Filter buttons -->
+                <div class="filter-btns">
+                    <button class="filter-btn active" data-filter="all">All</button>
+                    <button class="filter-btn" data-filter="long">Videos</button>
+                    <button class="filter-btn" data-filter="shorts">Shorts</button>
                 </div>
                 <div class="quality-picker">
                     <label for="qualitySelect">Quality:</label>
@@ -129,8 +116,18 @@
             </div>
         </div>
 
+        <!-- Drag hint -->
+        <div class="drag-hint" id="dragHint">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke-dasharray="4 2"/></svg>
+            Click &amp; drag to select multiple thumbnails
+        </div>
+
         <!-- Thumbnail Grid -->
-        <div class="grid" id="thumbnailGrid"></div>
+        <div class="grid-wrap" id="gridWrap">
+            <div class="grid" id="thumbnailGrid"></div>
+            <!-- Drag selection box -->
+            <div class="selection-box" id="selectionBox"></div>
+        </div>
 
         <!-- Load More -->
         <div class="load-more-wrap" id="loadMoreWrap" style="display:none;">
@@ -143,7 +140,7 @@
         </div>
     </section>
 
-    <!-- Floating Action Bar (visible when scrolled down with selection) -->
+    <!-- Floating Action Bar -->
     <div class="fab" id="fab" style="display:none;">
         <div class="fab-inner">
             <span class="fab-count" id="fabCount">0 selected</span>

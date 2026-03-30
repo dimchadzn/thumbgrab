@@ -124,6 +124,7 @@ def get_channel():
 
     # Fetch first batch of videos
     videos, next_page = fetch_videos(uploads_playlist, None)
+    videos = enrich_with_durations(videos)
 
     return jsonify({
         "channel": {
@@ -151,6 +152,7 @@ def get_videos():
         return jsonify({"error": "Missing playlist_id"}), 400
 
     videos, next_page = fetch_videos(playlist_id, page_token)
+    videos = enrich_with_durations(videos)
     return jsonify({"videos": videos, "next_page_token": next_page})
 
 
@@ -200,6 +202,39 @@ def fetch_videos(playlist_id, page_token):
 
     next_page = data.get("nextPageToken")
     return videos, next_page
+
+
+def parse_duration(iso):
+    """Parse ISO 8601 duration to seconds."""
+    import re as _re
+    m = _re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', iso or '')
+    if not m:
+        return 0
+    return int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
+
+
+def enrich_with_durations(videos):
+    """Fetch video durations and add is_short flag."""
+    if not videos:
+        return videos
+    ids = ",".join(v["id"] for v in videos if v.get("id"))
+    if not ids:
+        return videos
+    resp = requests.get(f"{YT_API}/videos", params={
+        "part": "contentDetails",
+        "id": ids,
+        "key": API_KEY,
+    })
+    data = resp.json()
+    duration_map = {}
+    for item in data.get("items", []):
+        seconds = parse_duration(item.get("contentDetails", {}).get("duration", ""))
+        duration_map[item["id"]] = seconds
+    for v in videos:
+        dur = duration_map.get(v["id"], 0)
+        v["duration"] = dur
+        v["is_short"] = dur <= 60
+    return videos
 
 
 @app.route("/api/download-zip", methods=["POST"])
